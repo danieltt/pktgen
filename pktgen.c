@@ -496,14 +496,9 @@ static void pktgen_stop(struct pktgen_thread *t);
 static void pktgen_clear_counters(struct pktgen_dev *pkt_dev);
 
 /*Receiver functions*/
-static int pktgen_rcv_basic(struct sk_buff *skb, struct net_device *dev,
-	struct packet_type *pt, struct net_device *orig_dev);
-static int pktgen_rcv6_basic(struct sk_buff *skb, struct net_device *dev,
-	struct packet_type *pt, struct net_device *orig_dev);
-static int pktgen_rcv_time(struct sk_buff *skb, struct net_device *dev,
-	struct packet_type *pt, struct net_device *orig_dev);
-static int pktgen_rcv_counter(struct sk_buff *skb, struct net_device *dev,
-	struct packet_type *pt, struct net_device *orig_dev);
+unsigned int pktgen_rcv_counter(unsigned int hooknum, struct sk_buff *skb, const struct net_device *in, const struct net_device *out, int (*okfn)(struct sk_buff *));
+unsigned int pktgen_rcv_basic(unsigned int hooknum, struct sk_buff *skb, const struct net_device *in, const struct net_device *out, int (*okfn)(struct sk_buff *));
+unsigned int pktgen_rcv_time(unsigned int hooknum, struct sk_buff *skb, const struct net_device *in, const struct net_device *out, int (*okfn)(struct sk_buff *));
 static int pktgen_add_rx(const char *ifname);
 static int pktgen_set_statistics(const char *f);
 static int pktgen_set_display(const char *f);
@@ -528,19 +523,18 @@ static struct notifier_block pktgen_notifier_block = {
 };
 
 /*Reception functions test*/
-static struct packet_type pktgen_packet_type __read_mostly = {
-	.type = __constant_htons(ETH_P_IP),
-	.func = pktgen_rcv_basic,
+static struct nf_hook_ops nfho __read_mostly = {
+	.hook = pktgen_rcv_basic,
+	.hooknum = NF_INET_PRE_ROUTING,
+	.pf = PF_INET,
+	.priority = 1,
+	.owner = THIS_MODULE,
 };
-
-static struct nf_hook_ops nfho;
-unsigned int hook_func(unsigned int hooknum, struct sk_buff *skb, const struct net_device *in, const struct net_device *out, int (*okfn)(struct sk_buff *));
 
 /*
  * /proc handling functions
  *
  */
-
 static int pgctrl_show(struct seq_file *seq, void *v)
 {
 	seq_puts(seq, version);
@@ -3989,7 +3983,8 @@ static int pktgen_add_rx(const char *ifname)
 		pg_rx_global->stats_option = RX_BASIC;
 		pg_rx_global->display_option = PG_DISPLAY_HUMAN;
 
-		//pktgen_packet_type.dev = idev;
+		nfho.hook = pktgen_rcv_basic;
+		nf_register_hook(&nfho);
 		//dev_add_pack(&pktgen_packet_type);
 		err = 0;
 		//net_disable_timestamp();
@@ -4013,32 +4008,24 @@ static int pktgen_set_statistics(const char *f)
 		return -ENOMEM;
 
 	//net_disable_timestamp();
+	nf_unregister_hook(&nfho);
 
-	//dev_remove_pack(&pktgen_packet_type);
 	if (!strcmp(f, "counter")) {
 		pg_rx_global->stats_option = RX_COUNTER;
-		pktgen_packet_type.func = pktgen_rcv_counter;
-		pktgen_packet_type.type = __constant_htons(ETH_P_IP),
+		nfho.hook = pktgen_rcv_counter;
 		ret = 0;
 	} else if (!strcmp(f, "basic")) {
 		pg_rx_global->stats_option = RX_BASIC;
-		pktgen_packet_type.func = pktgen_rcv_basic;
-		pktgen_packet_type.type = __constant_htons(ETH_P_IP),
-		ret = 0;
-	} else if (!strcmp(f, "basic6")) {
-		pg_rx_global->stats_option = RX_BASIC;
-		pktgen_packet_type.func = pktgen_rcv6_basic;
-		pktgen_packet_type.type = cpu_to_be16(ETH_P_IPV6),
+		nfho.hook = pktgen_rcv_basic;
 		ret = 0;
 	} else if (!strcmp(f, "time")) {
 		pg_rx_global->stats_option = RX_TIME;
-		pktgen_packet_type.func = pktgen_rcv_time;
-		pktgen_packet_type.type = __constant_htons(ETH_P_IP),
+		nfho.hook = pktgen_rcv_time;
 		ret = 0;
 	} else
 		ret = -EINVAL;
 
-	//dev_add_pack(&pktgen_packet_type);
+	nf_register_hook(&nfho);
 	return ret;
 }
 
@@ -4062,8 +4049,8 @@ static int pktgen_set_display(const char *f)
 static int pktgen_clean_rx(void)
 {
 	if (pg_initialized) {
+		nf_unregister_hook(&nfho);
 		kfree(pg_rx_global);
-		//dev_remove_pack(&pktgen_packet_type);
 		pg_initialized = 0;
 	}
 	return 0;
@@ -4149,54 +4136,40 @@ static int latency_calc(struct pktgen_hdr *pgh, ktime_t now,
 }
 
 /*Reception function*/
-static int pktgen_rcv_counter(struct sk_buff *skb, struct net_device *dev,
-			struct packet_type *pt, struct net_device *orig_dev)
+unsigned int pktgen_rcv_counter(unsigned int hooknum, struct sk_buff *skb, const struct net_device *in, const struct net_device *out, int (*okfn)(struct sk_buff *))
 {
-	struct iphdr *iph = ip_hdr(skb);
 	struct pktgen_hdr *pgh;
-	void *vaddr;
 	struct pktgen_rx *data_cpu;
-	if (skb_is_nonlinear(skb)) {
-		vaddr = kmap_atomic(skb_frag_page(&skb_shinfo(skb)->frags[0]));
-		pgh = (struct pktgen_hdr *)
-			(vaddr+skb_shinfo(skb)->frags[0].page_offset);
-	} else {
-		pgh = (struct pktgen_hdr *)(((char *)(iph)) + 28);
-	}
+	int ret = NF_DROP;
 
-	if (unlikely(pgh->pgh_magic != PKTGEN_MAGIC_NET))
+	pgh = (struct pktgen_hdr *)(((char *)(skb_transport_header(skb))) + 8);
+	
+	if (unlikely(pgh->pgh_magic != PKTGEN_MAGIC_NET)){
+		ret = NF_ACCEPT;
 		goto end;
-
+	}
 	data_cpu = &__get_cpu_var(pktgen_rx_data);
 	/* Update counter of packets*/
 	data_cpu->rx_packets++;
 	data_cpu->rx_bytes += skb->len + ETH_HLEN;
 
 end:
-	if (skb_is_nonlinear(skb))
-		kunmap_atomic(vaddr);
-	kfree_skb(skb);
-	return 0;
+	return ret;
 }
 
-static int pktgen_rcv_time(struct sk_buff *skb, struct net_device *dev,
-			 struct packet_type *pt, struct net_device *orig_dev)
+unsigned int pktgen_rcv_time(unsigned int hooknum, struct sk_buff *skb, const struct net_device *in, const struct net_device *out, int (*okfn)(struct sk_buff *))
 {
-	/*check magic*/
-	struct iphdr *iph = ip_hdr(skb);
 	struct pktgen_hdr *pgh;
-	void *vaddr;
 	struct pktgen_rx *data_cpu;
 	ktime_t now = ktime_get();
-	if (skb_is_nonlinear(skb)) {
-		vaddr = kmap_atomic(skb_frag_page(&skb_shinfo(skb)->frags[0]));
-		pgh = (struct pktgen_hdr *)
-			(vaddr+skb_shinfo(skb)->frags[0].page_offset);
-	} else {
-		pgh = (struct pktgen_hdr *)(((char *)(iph)) + 28);
-	}
-	if (unlikely(pgh->pgh_magic != PKTGEN_MAGIC_NET))
+	int ret = NF_DROP;
+
+	pgh = (struct pktgen_hdr *)(((char *)(skb_transport_header(skb))) + 8);
+	
+	if (unlikely(pgh->pgh_magic != PKTGEN_MAGIC_NET)){
+		ret = NF_ACCEPT;
 		goto end;
+	}
 
 	data_cpu = &__get_cpu_var(pktgen_rx_data);
 
@@ -4209,16 +4182,11 @@ static int pktgen_rcv_time(struct sk_buff *skb, struct net_device *dev,
 	data_cpu->rx_packets++;
 	data_cpu->rx_bytes += skb->len + ETH_HLEN;
 end:
-	if (skb_is_nonlinear(skb))
-		kunmap_atomic(vaddr);
-	kfree_skb(skb);
-	return 0;
+	return ret;
 }
 
-int pktgen_rcv_basic(struct sk_buff *skb, struct net_device *dev,
-			 struct packet_type *pt, struct net_device *orig_dev)
+unsigned int pktgen_rcv_basic(unsigned int hooknum, struct sk_buff *skb, const struct net_device *in, const struct net_device *out, int (*okfn)(struct sk_buff *))
 {
-	/* Check magic*/
 	struct pktgen_hdr *pgh;
 	struct pktgen_rx *data_cpu;
 	int ret = NF_DROP;
@@ -4238,48 +4206,9 @@ int pktgen_rcv_basic(struct sk_buff *skb, struct net_device *dev,
 	data_cpu->rx_packets++;
 	data_cpu->rx_bytes += skb->len + ETH_HLEN;
 end:
-//	kfree_skb(skb);
 	return ret;
 }
 
-
-int pktgen_rcv6_basic(struct sk_buff *skb, struct net_device *dev,
-			 struct packet_type *pt, struct net_device *orig_dev)
-{
-	/* Check magic*/
-	struct ipv6hdr *iph = ipv6_hdr(skb);
-	struct pktgen_hdr *pgh;
-	void *vaddr;
-	struct pktgen_rx *data_cpu;
-	if (skb_is_nonlinear(skb)) {
-		vaddr = kmap_atomic(skb_frag_page(&skb_shinfo(skb)->frags[0]));
-		pgh = (struct pktgen_hdr *)
-			(vaddr+skb_shinfo(skb)->frags[0].page_offset);
-	} else {
-		pgh = (struct pktgen_hdr *)(((char *)(iph)) + 48);
-	}
-	if (unlikely(pgh->pgh_magic != PKTGEN_MAGIC_NET))
-		goto end;
-
-	data_cpu = &__get_cpu_var(pktgen_rx_data);
-
-	throughput_data(ktime_get(), data_cpu);
-
-	/*update counter of packets*/
-	data_cpu->rx_packets++;
-	data_cpu->rx_bytes += skb->len + ETH_HLEN;
-end:
-	if (skb_is_nonlinear(skb))
-		kunmap_atomic(vaddr);
-	kfree_skb(skb);
-	return 0;
-}
-
-unsigned int hook_func(unsigned int hooknum, struct sk_buff *skb, const struct net_device *in, const struct net_device *out, int (*okfn)(struct sk_buff *))
-{
-	//return NF_ACCEPT;           
-	return pktgen_rcv_basic(skb, NULL, NULL, NULL);
-}
 
 static int __net_init pg_net_init(struct net *net)
 {
@@ -4381,14 +4310,10 @@ static int __init pg_init(void)
 	ret = register_netdevice_notifier(&pktgen_notifier_block);
 	if (ret)
 		unregister_pernet_subsys(&pg_net_ops);
-	pktgen_add_rx("all");
-	nfho.hook = hook_func;
-	nfho.hooknum = NF_INET_PRE_ROUTING;
-	//nfho.pf = NFPROTO_IPV4; //NFPROTO_IPV6
-	nfho.pf = PF_INET; //NFPROTO_IPV6
-	nfho.priority = 1;
-	nfho.owner = THIS_MODULE;
-	nf_register_hook(&nfho);
+	
+
+
+
 
 	return ret;
 }
@@ -4399,7 +4324,7 @@ static void __exit pg_cleanup(void)
 
 	unregister_netdevice_notifier(&pktgen_notifier_block);
 	unregister_pernet_subsys(&pg_net_ops);
-	nf_unregister_hook(&nfho);
+
 }
 
 module_init(pg_init);
