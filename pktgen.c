@@ -178,6 +178,7 @@
 
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
+#include <linux/time.h>
 
 #define VERSION	"2.75"
 #define IP_NAME_SZ 32
@@ -404,7 +405,8 @@ struct pktgen_dev {
 struct pktgen_hdr {
 	__be32 pgh_magic;
 	__be32 seq_num;
-	__s64 time;
+	__be32 tv_sec;
+	__be32 tv_usec;
 };
 
 
@@ -467,6 +469,8 @@ struct pktgen_rx {
 	ktime_t latency_last_tx;
 
 	struct net *net;
+
+	s64 offset;
 };
 
 struct pktgen_rx_global {
@@ -516,7 +520,6 @@ static DEFINE_MUTEX(pktgen_thread_lock);
 DEFINE_PER_CPU(struct pktgen_rx, pktgen_rx_data);
 static struct pktgen_rx_global *pg_rx_global;
 static int pg_initialized;
-static int is_pktgen_sending;
 
 static struct notifier_block pktgen_notifier_block = {
 	.notifier_call = pktgen_device_event,
@@ -2893,7 +2896,7 @@ static inline __be16 build_tci(unsigned int id, unsigned int cfi,
 static void pktgen_finalize_skb(struct pktgen_dev *pkt_dev, struct sk_buff *skb,
 				int datalen)
 {
-	//struct timeval timestamp;
+	struct timeval timestamp;
 	struct pktgen_hdr *pgh;
 
 	pgh = (struct pktgen_hdr *)skb_put(skb, sizeof(*pgh));
@@ -2951,10 +2954,10 @@ static void pktgen_finalize_skb(struct pktgen_dev *pkt_dev, struct sk_buff *skb,
 	pgh->pgh_magic = htonl(PKTGEN_MAGIC);
 	pgh->seq_num = htonl(pkt_dev->seq_num);
 
-//	do_gettimeofday(&timestamp);
-	pgh->time = htonll(ktime_to_ns(ktime_get()));
-//	pgh->tv_sec = htonl(timestamp.tv_sec);
-//	pgh->tv_usec = htonl(timestamp.tv_usec);
+	do_gettimeofday(&timestamp);
+//	pgh->time = htonll(ktime_to_ns(ktime_get()));
+	pgh->tv_sec = htonl(timestamp.tv_sec);
+	pgh->tv_usec = htonl(timestamp.tv_usec);
 }
 
 static struct sk_buff *pktgen_alloc_skb(struct net_device *dev,
@@ -3317,7 +3320,6 @@ static int pktgen_wait_all_threads_run(struct pktgen_net *pn)
 		list_for_each_entry(t, &pn->pktgen_threads, th_list)
 			t->control |= (T_STOP);
 
-	is_pktgen_sending = 0;
 	mutex_unlock(&pktgen_thread_lock);
 	return sig;
 }
@@ -3328,7 +3330,6 @@ static void pktgen_run_all_threads(struct pktgen_net *pn)
 
 	func_enter();
 
-	is_pktgen_sending = 1;
 	mutex_lock(&pktgen_thread_lock);
 
 	list_for_each_entry(t, &pn->pktgen_threads, th_list)
@@ -3946,6 +3947,16 @@ void pg_init_stats(struct pktgen_stats *stats)
 void pg_reset_rx(void)
 {
 	int cpu;
+	s64 offset;
+	struct timeval now;
+	ktime_t now1;
+
+	do_gettimeofday(&now);
+	now1 = ktime_get();
+
+	/*get timestamp offset*/
+	offset = timeval_to_ns(&now) - ktime_to_ns(now1);
+
 	for_each_online_cpu(cpu) {
 		per_cpu(pktgen_rx_data, cpu).rx_packets = 0;
 		per_cpu(pktgen_rx_data, cpu).rx_bytes = 0;
@@ -3954,6 +3965,7 @@ void pg_reset_rx(void)
 		per_cpu(pktgen_rx_data, cpu).inter_arrival_last = 0;
 		per_cpu(pktgen_rx_data, cpu).last_time_ktime.tv64 = 0;
 		per_cpu(pktgen_rx_data, cpu).latency_last_tx.tv64 = 0;
+		per_cpu(pktgen_rx_data, cpu).offset = offset;
 		pg_init_stats(&per_cpu(pktgen_rx_data, cpu).inter_arrival);
 		pg_init_stats(&per_cpu(pktgen_rx_data, cpu).jitter);
 		pg_init_stats(&per_cpu(pktgen_rx_data, cpu).latency);
@@ -4121,10 +4133,13 @@ static int latency_calc(struct pktgen_hdr *pgh, ktime_t now,
 		struct pktgen_rx *data_cpu)
 {
 	u64 latency = 0;
+	struct timeval time_tx;
 	ktime_t ktime_tx;
-	if (!is_pktgen_sending)
-		return 0;
-	ktime_tx.tv64 = ntohll(pgh->time);
+	time_tx.tv_sec = ntohl(pgh->tv_sec);
+	time_tx.tv_usec = ntohl(pgh->tv_usec);
+
+	ktime_tx = timeval_to_ktime(time_tx);
+	
 
 	if (ktime_equal(ktime_tx, data_cpu->latency_last_tx))
 		return 0;
