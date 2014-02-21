@@ -4143,7 +4143,7 @@ static int latency_calc(struct pktgen_hdr *pgh, ktime_t now,
 
 	if (ktime_equal(ktime_tx, data_cpu->latency_last_tx))
 		return 0;
-	latency = ktime_to_ns(ktime_sub(now, ktime_tx));
+	latency = ktime_to_ns(ktime_sub(now, ktime_tx)) - data_cpu->offset;
 	process_stats(latency, &data_cpu->latency);
 
 	data_cpu->latency_last_tx = ktime_tx;
