@@ -470,7 +470,7 @@ struct pktgen_rx {
 
 	struct net *net;
 
-	s64 offset;
+	ktime_t offset;
 };
 
 struct pktgen_rx_global {
@@ -3947,7 +3947,7 @@ void pg_init_stats(struct pktgen_stats *stats)
 void pg_reset_rx(void)
 {
 	int cpu;
-	s64 offset;
+	ktime_t offset;
 	struct timeval now;
 	ktime_t now1;
 
@@ -3955,7 +3955,7 @@ void pg_reset_rx(void)
 	now1 = ktime_get();
 
 	/*get timestamp offset*/
-	offset = timeval_to_ns(&now) - ktime_to_ns(now1);
+	offset = ktime_sub(timeval_to_ktime(now),now1);
 
 	for_each_online_cpu(cpu) {
 		per_cpu(pktgen_rx_data, cpu).rx_packets = 0;
@@ -4143,7 +4143,9 @@ static int latency_calc(struct pktgen_hdr *pgh, ktime_t now,
 
 	if (ktime_equal(ktime_tx, data_cpu->latency_last_tx))
 		return 0;
-	latency = ktime_to_ns(ktime_sub(now, ktime_tx)) - data_cpu->offset;
+	latency = ktime_to_ns(ktime_sub(ktime_add(now, data_cpu->offset),
+			ktime_tx));
+
 	process_stats(latency, &data_cpu->latency);
 
 	data_cpu->latency_last_tx = ktime_tx;
