@@ -3950,12 +3950,17 @@ void pg_reset_rx(void)
 	ktime_t offset;
 	struct timeval now;
 	ktime_t now1;
+	ktime_t now2;
+	ktime_t now_1_2;
 
-	do_gettimeofday(&now);
 	now1 = ktime_get();
+	do_gettimeofday(&now);
+	now2 = ktime_get();
+	/*Calculate middle time. Approximation to read getttimeofdag*/
+	now_1_2 = ktime_add_ns(now1, ktime_to_ns(ktime_sub(now2, now1))/2);
 
 	/*get timestamp offset*/
-	offset = ktime_sub(timeval_to_ktime(now),now1);
+	offset = ktime_sub(timeval_to_ktime(now),now_1_2);
 
 	for_each_online_cpu(cpu) {
 		per_cpu(pktgen_rx_data, cpu).rx_packets = 0;
