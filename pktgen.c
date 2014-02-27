@@ -459,7 +459,7 @@ struct pktgen_rx {
 	/*inter-arrival variables*/
 	struct pktgen_stats inter_arrival;
 	ktime_t last_time_ktime;
-	u64	inter_arrival_last;
+	u64	latency_last;
 
 	struct pktgen_stats jitter;
 
@@ -3951,7 +3951,7 @@ void pg_reset_rx(void)
 		per_cpu(pktgen_rx_data, cpu).rx_bytes = 0;
 		per_cpu(pktgen_rx_data, cpu).last_time.tv64 = 0;
 		per_cpu(pktgen_rx_data, cpu).start_time.tv64 = 0;
-		per_cpu(pktgen_rx_data, cpu).inter_arrival_last = 0;
+		per_cpu(pktgen_rx_data, cpu).latency_last = 0;
 		per_cpu(pktgen_rx_data, cpu).last_time_ktime.tv64 = 0;
 		per_cpu(pktgen_rx_data, cpu).latency_last_tx.tv64 = 0;
 		pg_init_stats(&per_cpu(pktgen_rx_data, cpu).inter_arrival);
@@ -4085,8 +4085,7 @@ void process_stats(u64 value, struct pktgen_stats *stats)
 static int inter_arrival_ktime(ktime_t now, struct pktgen_rx *data_cpu)
 {
 	ktime_t last_time;
-	u64 inter_arrival = 0, inter_arrival_last = 0;
-	s64 jitter = 0;
+	u64 inter_arrival = 0;
 
 	last_time = data_cpu->last_time_ktime;
 	if (last_time.tv64 == 0) {
@@ -4098,21 +4097,6 @@ static int inter_arrival_ktime(ktime_t now, struct pktgen_rx *data_cpu)
 	process_stats(inter_arrival,
 			&data_cpu->inter_arrival);
 	data_cpu->last_time_ktime = now;
-	/* Jitter calculation*/
-	inter_arrival_last = data_cpu->inter_arrival_last;
-	if (inter_arrival_last == 0) {
-		data_cpu->inter_arrival_last = inter_arrival;
-		return 0;
-	}
-
-	jitter = inter_arrival_last - inter_arrival;
-	if (jitter < 0)
-		jitter = -jitter;
-
-	process_stats(jitter, &data_cpu->jitter);
-
-
-	data_cpu->inter_arrival_last = inter_arrival;
 
 	return 0;
 }
@@ -4121,6 +4105,7 @@ static int latency_calc(struct pktgen_hdr *pgh, ktime_t now,
 		struct pktgen_rx *data_cpu)
 {
 	u64 latency = 0;
+	u64 jitter = 0;
 	ktime_t ktime_tx;
 	if (!is_pktgen_sending)
 		return 0;
@@ -4131,7 +4116,18 @@ static int latency_calc(struct pktgen_hdr *pgh, ktime_t now,
 	latency = ktime_to_ns(ktime_sub(now, ktime_tx));
 	process_stats(latency, &data_cpu->latency);
 
+	/*Jitter calculation*/
+	/*  J = |(R1 - S1) - (R0 - S0)| */
+	if (latency > data_cpu->latency_last)
+		jitter = latency - data_cpu->latency_last;
+	else
+		jitter = data_cpu->latency_last - latency;
+
+	process_stats(jitter, &data_cpu->jitter);
+
+	/*Memory for next iteration*/
 	data_cpu->latency_last_tx = ktime_tx;
+	data_cpu->latency_last = latency;;
 	return 0;
 }
 
