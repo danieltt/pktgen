@@ -14,10 +14,16 @@ To load the module
 
 insmod ./pktgen.ko
 
+it is necessary to map each interrupt with a different core
+use  [eth-affinity] (https://github.com/jelaas/eth-affinity) to set up
+automaticaly.
+
+> eth-affinity
+
 to start the receiver, you need to be root
 sudo su
 
-echo rx eth1 > /proc/net/pktgen/pgrx
+> echo rx eth1 > /proc/net/pktgen/pgrx
 
 options for the receiver:
 
@@ -29,7 +35,7 @@ options for the receiver:
 
 to read the results
 
-cat /proc/net/pktgen/pgrx
+> cat /proc/net/pktgen/pgrx
 
 examples for transmitting can be found at the examples folder. For more details look at the pktgen documetation 
 in the linux kernel  Documentation/networking/pktgen.txt
