@@ -24,11 +24,12 @@ automaticaly.
 > eth-affinity
 
 to start the receiver, you need to be root
-sudo su
+
+> sudo su
 
 > echo rx eth1 > /proc/net/pktgen/pgrx
 
-options for the receiver:
+Some options for the receiver:
 
 * rx [device] to enable the receiver part for a specific device. If it is wrong, all the devices are used. (all versions)
 * rx_reset: to reset the counters
@@ -40,7 +41,9 @@ options for the receiver:
 to read the results
 
 > cat /proc/net/pktgen/pgrx
+
+and change output format:
+
 > echo display script > /proc/net/pktgen/pgrx
 
-examples for transmitting can be found at the examples folder. For more details look at the pktgen documetation 
-in the linux kernel  Documentation/networking/pktgen.txt
+examples for transmitting can be found at the examples folder. For more details look at the pktgen documetation in the linux kernel *Documentation/networking/pktgen.txt*
