@@ -1,0 +1,64 @@
+#! /bin/sh
+# $1 Rate in packets per s
+# $2 Number of CPUs to use
+function pgset() {
+    local result
+    echo $1 > $PGDEV
+}
+
+# Config Start Here -----------------------------------------------------------
+
+# thread config
+CPUS=$2
+PKTS=`echo "scale=0; $3/$CPUS" | bc`
+CLONE_SKB="clone_skb 10"
+PKT_SIZE="pkt_size 60"
+COUNT="count $PKTS"
+DELAY="delay 0"
+MAC="00:1B:21:57:ED:85"
+ETH="eth7"
+
+RATEP=`echo "scale=0; $1/$CPUS" | bc`
+
+for processor in {0..7}
+do
+PGDEV=/proc/net/pktgen/kpktgend_$processor
+#  echo "Removing all devices"
+ pgset "rem_device_all"
+done
+
+
+for ((processor=0;processor<$CPUS;processor++))
+do
+PGDEV=/proc/net/pktgen/kpktgend_$processor
+#  echo "Adding $ETH"
+ pgset "add_device $ETH@$processor"
+ 
+PGDEV=/proc/net/pktgen/$ETH@$processor
+#  echo "Configuring $PGDEV"
+ pgset "$COUNT"
+ pgset "flag QUEUE_MAP_CPU"
+ pgset "$CLONE_SKB"
+ pgset "$PKT_SIZE"
+ pgset "$DELAY"
+ pgset "ratep $RATEP"
+ pgset "dst 10.0.0.1" 
+ pgset "dst_mac $MAC"
+ # Random address with in the min-max range
+ pgset "flag IPDST_RND"
+ pgset "dst_min 10.0.0.0"
+ pgset "dst_max 10.255.255.255"
+# enable configuration packet
+ pgset "config 1"
+ pgset "flows 1024"
+ pgset "flowlen 8"
+done
+
+# Time to run
+PGDEV=/proc/net/pktgen/pgctrl
+
+ echo "Running... ctrl^C to stop"
+ pgset "start" 
+ echo "Done"
+
+#grep -h pps /proc/net/pktgen/eth*

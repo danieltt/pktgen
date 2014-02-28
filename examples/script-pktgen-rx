@@ -1,0 +1,23 @@
+#! /bin/sh
+
+function pgset() {
+    local result
+    echo $1 > $PGDEV
+}
+
+#Disable autonegotion in the iterface
+/bin64/ethtool -A $1 autoneg off rx off tx off
+
+# Reception configuration
+PGDEV=/proc/net/pktgen/pgrx
+  echo "Removing old config"
+ pgset "rx_reset"
+  echo "Adding rx $1"
+ pgset "rx $1" 
+  echo "Setting statistics $2"
+ pgset "statistics $2"
+ pgset "display human"
+# pgset "display script"
+
+# Result can be vieved in /proc/net/pktgen/eth1
+#cat /proc/net/pktgen/pgrx
