@@ -12,7 +12,7 @@ It uses netfilter hooks to process incomming packets.
 
 To load the module
 
-insmod ./pktgen.ko
+> insmod ./pktgen.ko
 
 it is necessary to map each interrupt with a different core
 use  [eth-affinity] (https://github.com/jelaas/eth-affinity) to set up
@@ -33,9 +33,11 @@ options for the receiver:
 * display [human or script]
 * statistics [counter, basic, or time] 
 
+
 to read the results
 
 > cat /proc/net/pktgen/pgrx
+> echo display script > /proc/net/pktgen/pgrx
 
 examples for transmitting can be found at the examples folder. For more details look at the pktgen documetation 
 in the linux kernel  Documentation/networking/pktgen.txt
