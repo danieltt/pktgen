@@ -14,6 +14,7 @@ It uses netfilter hooks to process incomming packets.
 To compile and load the module
 
 > make
+
 > insmod ./pktgen.ko
 
 it is necessary to map each interrupt with a different core
