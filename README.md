@@ -7,18 +7,15 @@ To compile the headers of the running kernel are required.
 
 > sudo apt-get install linux-headers-$(uname -r)
 
-Current version for kernel 3.11.0
+Current version for kernel 3.11.0. It uses netfilter hooks to process incomming packets.
 
-It uses netfilter hooks to process incomming packets.
-
-To compile and load the module
+To compile and load the module:
 
 > make
 
 > insmod ./pktgen.ko
 
-it is necessary to map each interrupt with a different core
-use  [eth-affinity] (https://github.com/jelaas/eth-affinity) to set up
+it is necessary to map each interrupt with a different core. You can use  [eth-affinity] (https://github.com/jelaas/eth-affinity) to set up
 automaticaly.
 
 > eth-affinity
