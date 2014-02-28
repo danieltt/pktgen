@@ -4,14 +4,16 @@ pktgen
 Kernel module for packet generator and packet receiver with statistics. Source based from Linux Kernel pktgen 3.11.0
 
 To compile the headers of the running kernel are required.
-sudo apt-get install linux-headers-$(uname -r)
+
+> sudo apt-get install linux-headers-$(uname -r)
 
 Current version for kernel 3.11.0
 
 It uses netfilter hooks to process incomming packets.
 
-To load the module
+To compile and load the module
 
+> make
 > insmod ./pktgen.ko
 
 it is necessary to map each interrupt with a different core
