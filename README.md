@@ -44,3 +44,5 @@ and change output format:
 > echo display script > /proc/net/pktgen/pgrx
 
 examples for transmitting can be found at the examples folder. For more details look at the pktgen documetation in the linux kernel *Documentation/networking/pktgen.txt*
+
+More information can be found at http://people.kth.se/~danieltt/pktgen
